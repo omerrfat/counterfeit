@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+  <title>Counterfeit</title>
+  <meta name="description" content="A daily trivia game. Three of today's eight museum exhibits are forgeries. Find them in the dark." />
+  <meta name="theme-color" content="#061210" />
+  <meta name="color-scheme" content="dark" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,500..900;1,6..96,500..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&display=swap" rel="stylesheet" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23081412'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%23c9a55a' stroke-width='2.5'/%3E%3Cpath d='M11 21 21 11' stroke='%23bf3b30' stroke-width='3'/%3E%3C/svg%3E" />
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <filter id="rough" x="-5%" y="-5%" width="110%" height="110%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="4" result="n" />
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="2.2" />
+    </filter>
+  </svg>
+
+  <div id="app" class="is-title">
+    <div id="stage">
+      <main id="wall" aria-live="polite">
+        <header id="wing" class="wing">
+          <h2 id="wingName"></h2>
+          <p id="wingHint">Three of these eight exhibits are forgeries.</p>
+        </header>
+        <section id="gallery" class="gallery" aria-label="Exhibits"></section>
+      </main>
+
+      <section id="title" class="title">
+        <h1 id="titleWord">Counterfeit</h1>
+        <p id="titleLine">Eight exhibits. Three forgeries. One torch.</p>
+        <p id="titleWing"></p>
+      </section>
+    </div>
+
+    <canvas id="dust" aria-hidden="true"></canvas>
+    <div id="dark" aria-hidden="true"></div>
+
+    <header id="hud">
+      <div class="hud-left"><span class="wordmark">Counterfeit</span><span id="caseNo" class="caseno"></span></div>
+      <div class="battery" id="battery" role="img" aria-label="Torch battery">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M8 2h8l-1 5H9L8 2Zm1 6h6l1 3v9a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2v-9l1-3Z" fill="currentColor"/></svg>
+        <span class="battery-track"><span id="batteryFill"></span></span>
+      </div>
+      <div class="hud-right">
+        <button id="btnLights" class="icon" aria-pressed="false" title="House lights (assisted mode)" aria-label="House lights">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.1 1 1.9v.7h5v-.7c0-.8.4-1.4 1-1.9A6 6 0 0 0 12 3Zm-2.5 15h5v1.2a1.8 1.8 0 0 1-1.8 1.8h-1.4a1.8 1.8 0 0 1-1.8-1.8V18Z" fill="currentColor"/></svg>
+        </button>
+        <button id="btnSound" class="icon" aria-pressed="true" title="Sound" aria-label="Sound">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path id="soundPath" d="M4 9v6h4l5 4V5L8 9H4Zm11.5 3a3.5 3.5 0 0 0-2-3.1v6.2a3.5 3.5 0 0 0 2-3.1Z" fill="currentColor"/></svg>
+        </button>
+        <button id="btnHelp" class="icon" title="How to play" aria-label="How to play">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm1 16h-2v-2h2v2Zm1.8-7.2-.9.9c-.6.6-.9 1-.9 2.3h-2v-.5c0-1 .3-1.8.9-2.4l1.2-1.2c.3-.3.5-.8.5-1.2a1.5 1.5 0 0 0-3 0H8a3.5 3.5 0 0 1 7 0c0 .8-.3 1.6-.2 2.1Z" fill="currentColor"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <div id="begin" class="begin">
+      <button id="btnBegin" class="cta">Begin inspection</button>
+      <p id="beginNote"></p>
+    </div>
+
+    <footer id="deck" class="deck" hidden>
+      <div class="deck-play" id="deckPlay">
+        <div class="wager" role="radiogroup" aria-label="Confidence">
+          <button class="chip" role="radio" data-w="1" aria-checked="true"><b>×1</b> Hunch</button>
+          <button class="chip" role="radio" data-w="2" aria-checked="false"><b>×2</b> Likely</button>
+          <button class="chip" role="radio" data-w="3" aria-checked="false"><b>×3</b> Certain</button>
+        </div>
+        <div class="stamps">
+          <button id="stampReal" class="stamp stamp-real" disabled><span>Genuine</span><kbd>G</kbd></button>
+          <button id="stampFake" class="stamp stamp-fake" disabled><span>Forgery</span><kbd>F</kbd></button>
+        </div>
+        <div class="progress">
+          <span id="progressText">Choose an exhibit</span>
+          <button id="btnClose" class="close" disabled>Close the case</button>
+        </div>
+      </div>
+      <div class="deck-result" id="deckResult" hidden>
+        <div class="rank">
+          <span id="rankName" class="rank-name"></span>
+          <span id="rankScore" class="rank-score"></span>
+        </div>
+        <div id="pips" class="pips" aria-hidden="true"></div>
+        <div class="result-actions">
+          <button id="btnShare" class="cta small">Share result</button>
+          <span id="nextCase" class="next"></span>
+        </div>
+        <p id="streakLine" class="streak"></p>
+      </div>
+    </footer>
+
+    <dialog id="help">
+      <form method="dialog">
+        <h2>How to inspect</h2>
+        <p>Every day the museum hangs eight exhibits on one theme. <strong>Three are forgeries</strong>: plausible claims that are false. Your torch is the only light, and the battery is draining.</p>
+        <ul>
+          <li>Move the torch over an exhibit to read it. Click or tap it to select.</li>
+          <li>Stamp it <em>Genuine</em> or <em>Forgery</em>, and choose how sure you are.</li>
+          <li>A right call earns its multiplier. A wrong one costs it. Leaving a stamp off costs nothing but earns nothing.</li>
+          <li>Rule on all eight, then close the case to turn the lights on.</li>
+        </ul>
+        <p class="keys">Keys: Tab moves between exhibits, G or F stamps, 1 2 3 sets confidence.</p>
+        <button class="cta small">Back to the dark</button>
+      </form>
+    </dialog>
+
+    <div id="toast" role="status" aria-live="polite"></div>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
