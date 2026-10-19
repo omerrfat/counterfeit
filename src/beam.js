@@ -3,8 +3,10 @@ import gsap from 'gsap';
 // The torch: a radial cut-out in a full-screen darkness layer, plus dust motes
 // that live under it so they are only visible where the beam touches.
 export class Beam {
-  constructor(darkEl, canvas, { reduced = false } = {}) {
+  constructor(darkEl, canvas, { reduced = false, maskEls = [] } = {}) {
     this.darkEl = darkEl;
+    this.maskEls = maskEls;
+    this.r = 200;
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.reduced = reduced;
@@ -68,12 +70,26 @@ export class Beam {
     }
     const r = Math.max(8, this.radius());
     const d = s.dark;
+    this.r = r;
     const el = this.darkEl;
     el.style.setProperty('--bx', s.x.toFixed(1) + 'px');
     el.style.setProperty('--by', s.y.toFixed(1) + 'px');
     el.style.setProperty('--br', r.toFixed(1) + 'px');
     el.style.setProperty('--dark', d.toFixed(3));
+    this.applyMask(r, d);
     this.draw(dt / 1000, r);
+  }
+
+  // The torch is also a mask: everything on the stage fades out beyond the beam,
+  // so the 3D hall behind it shows through the gaps.
+  applyMask(r, d) {
+    const floor = 0.05 + (1 - d) * 0.95;
+    let image = 'none';
+    if (floor < 0.995) {
+      const mid = (1 + floor) / 2;
+      image = `radial-gradient(circle ${r.toFixed(1)}px at ${this.s.x.toFixed(1)}px ${this.s.y.toFixed(1)}px, #000 0%, #000 34%, rgba(0,0,0,${mid.toFixed(3)}) 68%, rgba(0,0,0,${floor.toFixed(3)}) 100%)`;
+    }
+    for (const m of this.maskEls) { m.style.maskImage = image; m.style.webkitMaskImage = image; }
   }
 
   draw(dt, r) {

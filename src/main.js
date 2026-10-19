@@ -4,6 +4,9 @@ import { getPuzzle, dayIndexFor, msToNextCase, rankFor, MAX_SCORE } from './cont
 import { loadStore, saveStore, resetStore } from './store.js';
 import * as sfx from './audio.js';
 import { Beam } from './beam.js';
+import { Gallery3D } from './scene.js';
+import { submitVisit, fetchVisits, demoVisits } from './visitors.js';
+import { renderBook, openBook, closeBook, masterpiece, visitorTag } from './book.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -14,6 +17,9 @@ if (params.has('reset')) resetStore();
 const RM = params.get('motion') === 'full' ? false : matchMedia('(prefers-reduced-motion: reduce)').matches;
 const D = (x) => (RM ? 0.01 : x);
 const COARSE = matchMedia('(pointer: coarse)').matches;
+
+// The in-app preview runs at ~2 fps; with lag smoothing on, timelines crawl. Debug only.
+if (params.has('debug')) gsap.ticker.lagSmoothing(0);
 
 const store = loadStore();
 const dayIdx = params.has('day') ? Math.max(0, parseInt(params.get('day'), 10) - 1) : dayIndexFor();
@@ -32,9 +38,17 @@ let selected = null;
 let wager = 1;
 let helpOpen = false;
 
-const beam = new Beam($('#dark'), $('#dust'), { reduced: RM });
+const beam = new Beam($('#dark'), $('#dust'), { reduced: RM, maskEls: [$('#wing'), $('#title')] });
 beam.battery = rec.battery;
 beam.s.dark = state === 'reveal' ? 0 : 1;
+
+const hall = params.has('nogl') ? null : Gallery3D.create($('#gl'), { reduced: RM });
+if (!hall) document.body.classList.add('no-gl');
+// Set the mode without dropping other classes.
+const setMode = (m) => { app.classList.remove('is-title', 'is-play', 'is-reveal'); app.classList.add(m); };
+gsap.ticker.add((time, dt) => {
+  if (hall) hall.update(Math.min(dt, 100) / 1000, { x: beam.s.x, y: beam.s.y, r: beam.r, dark: beam.s.dark, flick: beam.s.flick }, time);
+});
 
 // ---------- Static copy ----------
 $('#wingName').textContent = `The ${puzzle.wing.replace(/^The /, '')} wing`.replace('The The', 'The');
@@ -57,16 +71,19 @@ puzzle.order.forEach((ci, slot) => {
   el.dataset.i = ci;
   el.style.setProperty('--tilt', puzzle.tilts[slot].toFixed(2) + 'deg');
   el.innerHTML = `
-    <div class="frame">
-      <div class="label">
-        <p class="verdict-line">${c.real ? 'Genuine' : 'Forgery'}</p>
-        <h3 class="subject">${c.subject}</h3>
-        <p class="claim">${c.text}</p>
-        <p class="truth"><b>${c.real ? 'Also:' : 'In fact:'}</b> ${c.truth}</p>
+    <div class="bob"><div class="tilt">
+      <div class="frame">
+        <div class="label">
+          <p class="verdict-line">${c.real ? 'Genuine' : 'Forgery'}</p>
+          <h3 class="subject">${c.subject}</h3>
+          <p class="claim">${c.text}</p>
+          <p class="truth"><b>${c.real ? 'Also:' : 'In fact:'}</b> ${c.truth}</p>
+          <p class="visitors" hidden></p>
+        </div>
+        <div class="ink" aria-hidden="true"><div class="ink-stamp"><span></span><i></i></div></div>
+        <div class="badge" aria-hidden="true"></div>
       </div>
-      <div class="ink" aria-hidden="true"><div class="ink-stamp"><span></span><i></i></div></div>
-      <div class="badge" aria-hidden="true"></div>
-    </div>`;
+    </div></div>`;
   el.addEventListener('click', () => {
     if (state !== 'play') return;
     select(ci, { aim: COARSE });
@@ -82,6 +99,52 @@ puzzle.order.forEach((ci, slot) => {
 });
 const inkRot = (ci) => ((ci * 37) % 11) - 5;
 
+// ---------- 3D feel: idle float, lean toward the torch, glare ----------
+const bobs = els.map((el) => $('.bob', el));
+const tiltEls = els.map((el) => $('.tilt', el));
+const frames = els.map((el) => $('.frame', el));
+const qTiltX = tiltEls.map((t) => gsap.quickTo(t, 'rotationX', { duration: 0.7, ease: 'power3.out' }));
+const qTiltY = tiltEls.map((t) => gsap.quickTo(t, 'rotationY', { duration: 0.7, ease: 'power3.out' }));
+let rects = [];
+const refreshRects = () => { rects = els.map((el) => el.getBoundingClientRect()); };
+addEventListener('resize', refreshRects);
+wall.addEventListener('scroll', refreshRects, { passive: true });
+setInterval(refreshRects, 800);
+
+function startFloat() {
+  if (RM) return;
+  bobs.forEach((b, i) => {
+    gsap.to(b, {
+      y: gsap.utils.random(-6, 6), rotationZ: gsap.utils.random(-0.5, 0.5),
+      duration: gsap.utils.random(3.2, 5.4), ease: 'sine.inOut', yoyo: true, repeat: -1, delay: i * 0.17,
+    });
+  });
+}
+
+// Each card is darkened by its own overlay, positioned in card space so the torch
+// reads correctly even as cards float and tilt.
+gsap.ticker.add(() => {
+  if (state === 'title' || !rects.length) return;
+  const lit = beam.s.dark < 0.001;
+  if (state === 'reveal' && lit && !frames[0].style.getPropertyValue('--dk')) return;
+  const bx = beam.s.x, by = beam.s.y, dk = beam.s.dark.toFixed(3), tr = beam.r.toFixed(1) + 'px';
+  for (let i = 0; i < els.length; i++) {
+    const r = rects[i];
+    if (state === 'play' && !RM) {
+      // lean toward the light: the card turns its face to the torch
+      const dx = (bx - (r.left + r.width / 2)) / innerWidth;
+      const dy = (by - (r.top + r.height / 2)) / innerHeight;
+      qTiltY[i](gsap.utils.clamp(-10, 10, dx * 26));
+      qTiltX[i](gsap.utils.clamp(-8, 8, -dy * 20));
+    }
+    const f = frames[i].style;
+    f.setProperty('--gx', (bx - r.left).toFixed(1) + 'px');
+    f.setProperty('--gy', (by - r.top).toFixed(1) + 'px');
+    f.setProperty('--tr', tr);
+    f.setProperty('--dk', dk);
+  }
+});
+
 // ---------- Beam & pointer ----------
 const qRotY = gsap.quickTo(stage, 'rotationY', { duration: 0.9, ease: 'power3.out' });
 const qRotX = gsap.quickTo(stage, 'rotationX', { duration: 0.9, ease: 'power3.out' });
@@ -91,6 +154,7 @@ function aimPointer(e) {
   if (state === 'reveal') return;
   if (intro) { intro.kill(); intro = null; }
   beam.aim(e.clientX, e.clientY - (e.pointerType === 'touch' ? 76 : 0));
+  if (hall) hall.lean((e.clientX / innerWidth - 0.5) * 2, (e.clientY / innerHeight - 0.5) * 2);
   if (!RM && e.pointerType === 'mouse') {
     qRotY((e.clientX / innerWidth - 0.5) * 2.4);
     qRotX(-(e.clientY / innerHeight - 0.5) * 1.6);
@@ -147,6 +211,8 @@ function select(ci, { aim = false } = {}) {
   els.forEach((el, i) => {
     el.classList.toggle('is-selected', i === ci);
     el.setAttribute('aria-pressed', String(i === ci));
+    // the chosen exhibit steps toward you
+    gsap.to(bobs[i], { z: i === ci && !RM ? 42 : 0, duration: 0.45, ease: 'power3.out', overwrite: 'auto' });
   });
   if (aim) aimAt(els[ci]);
   sfx.select();
@@ -192,7 +258,11 @@ function renderInk(ci, animate) {
 function impact(el, st, weight) {
   sfx.stampThud(weight);
   beam.pulse();
+  if (hall) hall.punch(weight);
   if (RM) return;
+  // the card recoils from the blow
+  const bi = els.indexOf(el);
+  gsap.fromTo(bobs[bi], { rotationX: 4 + weight * 2 }, { rotationX: 0, duration: 0.9, ease: 'elastic.out(1, 0.3)' });
   gsap.timeline()
     .to(stage, { y: 3 + weight * 2, duration: 0.04 })
     .to(stage, { y: -2, duration: 0.05 })
@@ -304,6 +374,50 @@ function showResult(animate) {
   });
 }
 
+// ---------- Visitors' book ----------
+let visit = null;
+const yourCorrect = () => puzzle.claims.reduce((s, _, i) => s + (verdictOk(i) === true ? 1 : 0), 0);
+
+function applyVisitorTags() {
+  const star = masterpiece(visit, puzzle.claims);
+  puzzle.claims.forEach((_, i) => {
+    const tag = visitorTag(visit, i);
+    const p = $('.visitors', els[i]);
+    if (tag) { p.textContent = tag; p.hidden = false; }
+    if (star && star.index === i) {
+      els[i].classList.add('is-masterpiece');
+      const r = document.createElement('span');
+      r.className = 'ribbon';
+      r.textContent = 'Most convincing forgery';
+      $('.frame', els[i]).appendChild(r);
+      if (!RM) gsap.from(r, { y: 10, opacity: 0, duration: 0.5, ease: 'back.out(2)' });
+    }
+  });
+}
+
+async function loadVisits() {
+  if (!visit) {
+    const results = puzzle.claims.map((_, i) => { const ok = verdictOk(i); return ok === null ? null : ok ? 1 : 0; });
+    try {
+      if (params.has('demo')) visit = demoVisits(dayIdx, results);
+      else if (!rec.posted) { visit = await submitVisit(dayIdx, results); rec.posted = true; save(); }
+      else visit = await fetchVisits(dayIdx);
+    } catch { visit = null; }
+  }
+  const btn = $('#btnBook');
+  if (!visit) { btn.textContent = 'Book closed'; btn.title = 'The visitors’ book could not be reached.'; return false; }
+  renderBook(visit, { yourCorrect: yourCorrect(), claims: puzzle.claims });
+  applyVisitorTags();
+  btn.disabled = false;
+  btn.classList.add('is-ready');
+  return true;
+}
+
+$('#btnBook').addEventListener('click', () => { sfx.click(); openBook(RM); });
+$('#bookClose').addEventListener('click', () => closeBook(RM));
+$('#book').addEventListener('cancel', (e) => { e.preventDefault(); closeBook(RM); });
+$('#book').addEventListener('click', (e) => { if (e.target === e.currentTarget) closeBook(RM); });
+
 function reveal(animate) {
   state = 'reveal';
   if (!rec.counted) {
@@ -320,8 +434,10 @@ function reveal(animate) {
 
   selected = null;
   els.forEach((el) => { el.classList.remove('is-selected'); el.setAttribute('aria-pressed', 'false'); });
-  app.className = 'is-reveal';
+  setMode('is-reveal');
   wall.scrollTop = 0;
+
+  const booked = loadVisits();   // post our result while the lights come up
 
   if (!animate) {
     gsap.set('#title', { autoAlpha: 0 });
@@ -335,6 +451,10 @@ function reveal(animate) {
   }
 
   const tl = gsap.timeline();
+  if (hall) hall.craneUp();
+  gsap.killTweensOf(bobs);
+  gsap.to(bobs, { y: 0, rotationZ: 0, rotationX: 0, z: 0, duration: D(0.5), ease: 'power2.out' });
+  gsap.to(tiltEls, { rotationX: 0, rotationY: 0, duration: D(0.5), ease: 'power2.out' });
   tl.to(deck, { yPercent: 100, duration: D(0.4), ease: 'power2.in' })
     .add(() => { sfx.flicker(5); beam.flicker(5); }, 0.1)
     .add(() => { sfx.lightsOn(); sfx.brighten(true); }, D(1.0))
@@ -348,7 +468,12 @@ function reveal(animate) {
       .to(frame, { rotationY: 0, duration: D(0.38), ease: 'back.out(1.5)' }, t + D(0.15))
       .from($('.badge', els[ci]), { scale: 0, duration: D(0.35), ease: 'back.out(3)' }, t + D(0.35));
   });
-  tl.add(() => { sfx.fanfare(); showResult(true); }, start + puzzle.order.length * D(0.34) + D(0.4));
+  tl.add(() => {
+    sfx.fanfare();
+    showResult(true);
+    // then the visitors' book opens by itself, once
+    booked.then((ok) => { if (ok) setTimeout(() => { if (state === 'reveal') openBook(RM); }, RM ? 10 : 1800); });
+  }, start + puzzle.order.length * D(0.34) + D(0.4));
 }
 
 // ---------- Beginning ----------
@@ -359,7 +484,7 @@ function begin() {
   sfx.click();
   if (intro) { intro.kill(); intro = null; }
   state = 'play';
-  app.className = 'is-play';
+  setMode('is-play');
   deck.hidden = false;
   updateDeck();
   els.forEach((_, i) => { if (rec.stamps[i]) renderInk(i, false); });
@@ -369,7 +494,9 @@ function begin() {
       if (!store.seenHelp) { store.seenHelp = true; save(); $('#help').showModal(); }
     },
   });
+  if (hall) hall.dolly();
   tl.add(() => { sfx.flicker(3); beam.flicker(3); }, 0)
+    .add(() => { refreshRects(); startFloat(); }, 1.6)
     .to('.begin', { opacity: 0, y: 20, duration: D(0.35) }, 0)
     .to('#title', { autoAlpha: 0, scale: 1.07, duration: D(0.8), ease: 'power2.in' }, 0.1)
     .set(wall, { autoAlpha: 1 }, 0.5)
@@ -433,11 +560,17 @@ $('#btnShare').addEventListener('click', async () => {
 
 // ---------- Boot ----------
 gsap.set(wall, { autoAlpha: 0 });
+if (!RM) {
+  gsap.from('#titleWord span', { yPercent: 70, rotationX: -85, opacity: 0, transformOrigin: '50% 100%', stagger: 0.06, duration: 1.3, ease: 'expo.out', delay: 0.3 });
+  gsap.from('#titleLine, #titleWing', { opacity: 0, y: 14, duration: 1, delay: 1.1, stagger: 0.15, ease: 'power3.out' });
+}
 if (state === 'reveal') {
-  app.className = 'is-reveal';
+  setMode('is-reveal');
   reveal(false);
 } else {
   runIntro();
 }
 
-if (params.has('debug')) window.__cf = { rec, puzzle, beam, stamp, select, reveal, begin, store };
+refreshRects();
+if (state === 'reveal' && hall) hall.craneUp();
+if (params.has('debug')) window.__cf = { rec, puzzle, beam, hall, stamp, select, reveal, begin, store };
